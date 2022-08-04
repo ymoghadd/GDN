@@ -57,6 +57,15 @@ class OutLayer(nn.Module):
 
         return out
 
+class GRAPH_POOL(nn.Module):
+    def __init__(self, in_channels, poolratio):
+        super(GRAPH_POOL, self).__init__()
+        self.in_channels = in_channels
+        self.poolratio = poolratio
+        self.graph_pool = SAGPooling(in_channels, ratio=poolratio)
+
+    def forward(self, x, edge_index, batch):
+        return self.graph_pool(x, edge_index, batch=batch)
 
 class GNNLayer(nn.Module):
     def __init__(self, in_channel, out_channel, inter_dim=0, heads=1, node_num=100):
@@ -81,13 +90,15 @@ class GNNLayer(nn.Module):
 
 
 class GDN(nn.Module):
-    def __init__(self, edge_index_sets, node_num, dim=64, out_layer_inter_dim=256, input_dim=10, out_layer_num=1, topk=20):
+    def __init__(self, edge_index_sets, node_num, pool_in_channels=5, pool_ratio=0.5, dim=64, out_layer_inter_dim=256, input_dim=10, out_layer_num=1, topk=20):
 
 
         super(GDN, self).__init__()
 
         self.edge_index_sets = edge_index_sets
-     
+        print('here')
+        print(edge_index_sets)
+
         device = get_device()
 
         edge_index = edge_index_sets[0]
@@ -108,6 +119,8 @@ class GDN(nn.Module):
         self.topk = topk
         self.learned_graph = None
 
+        self.pool_layer = GRAPH_POOL(pool_in_channels, pool_ratio)
+
         self.out_layer = OutLayer(dim*edge_set_num, node_num, out_layer_num, inter_num = out_layer_inter_dim)
 
         self.cache_edge_index_sets = [None] * edge_set_num
@@ -124,12 +137,15 @@ class GDN(nn.Module):
     def forward(self, data, org_edge_index):
         
         x = data.clone().detach()
+        print('x shape: ', x.shape, '\n')
         edge_index_sets = self.edge_index_sets
 
         device = data.device
 
         batch_num, node_num, all_feature = x.shape
+
         x = x.view(-1, all_feature).contiguous()
+        print('x shape: ', x.shape, '\n')
 
         gcn_outs = []
 
@@ -150,7 +166,7 @@ class GDN(nn.Module):
             all_embeddings = all_embeddings.repeat(batch_num, 1)
 
             weights = weights_arr.view(node_num, -1)
-   
+            rows = weights.shape[0]
         
             #weights_as_numpy_array = weights.cpu().detach().numpy()
             #np_corr_mat = np.corrcoef(weights_as_numpy_array, weights_as_numpy_array)
@@ -173,24 +189,57 @@ class GDN(nn.Module):
             topk_indices_ji = torch.topk(cos_ji_mat, topk_num, dim=-1)[1]
 
             self.learned_graph = topk_indices_ji
-     
+            graph.append(self.learned_graph)
+
             gated_i = torch.arange(0, node_num).T.unsqueeze(1).repeat(1, topk_num).flatten().to(device).unsqueeze(0)
             gated_j = topk_indices_ji.flatten().unsqueeze(0)
             gated_edge_index = torch.cat((gated_j, gated_i), dim=0)
- 
+            print('gated_edge_index shape: ', gated_edge_index.shape, '\n')
+
+
             batch_gated_edge_index = get_batch_edge_index(gated_edge_index, batch_num, node_num).to(device)
-            gcn_out = self.gnn_layers[i](x, batch_gated_edge_index, node_num=node_num*batch_num, embedding=all_embeddings)
-  
+
+            print('x shape: ', x.shape, '\n')
+            print('batch_gated_edge_index shape: ', batch_gated_edge_index.shape, '\n')
+            x, edge_index, _, batch, pool_perm, pool_score = self.pool_layer(x, batch_edge_index, batch=None)
+            print('AFTER POOLING')
+            batch_num, node_num, = x.shape
+            self.new_batch_num = batch_num
+            self.new_node_num = node_num
+            all_embeddings = self.embedding(torch.arange(node_num).to(device))
+            all_embeddings = all_embeddings.repeat(batch_num, 1)
+            gcn_out = self.gnn_layers[i](x, edge_index, node_num=node_num*batch_num, embedding=all_embeddings)
+
+            print('gcn_out', gcn_out, '\n')
+            print('gcn_out shape: ', gcn_out.shape, '\n')
+
             
             gcn_outs.append(gcn_out)
         
+        Correlation_Graph = nx.DiGraph()
+
+        '''
+        for topk_graph in graph:
+            for j in range(0, topk_graph.shape[0]):
+                Correlation_Graph.add_node(topk_graph[j])
+                for i in range(0, topk_graph.shape[1]):
+                    Correlation_Graph.add_node(i)
+                    Correlation_Graph.add_edge(i, j)
+        
+        
+        nx.draw(Correlation_Graph)
+        plt.savefig('All_110_graph.png')
+        '''
+        print('shape of x: ', x.shape, '\n')
         x = torch.cat(gcn_outs, dim=1)
+        print('shape of x: ', x.shape, '\n')
+        batch_num, node_num = x.shape
         x = x.view(batch_num, node_num, -1)
 
 
         indexes = torch.arange(0,node_num).to(device)
     
-        out = torch.mul(x, self.embedding(indexes))
+        out = torch.mul(x, indexes)
         
         out = out.permute(0,2,1)
         out = F.relu(self.bn_outlayer_in(out))
@@ -199,6 +248,7 @@ class GDN(nn.Module):
         out = self.dp(out)
         out = self.out_layer(out)
         out = out.view(-1, node_num)
-
+   
+        print("REACHED THE END")
         return out
         

@@ -26,20 +26,20 @@ def get_attack_interval(attack):
 
 # calculate F1 scores
 def eval_scores(scores, true_scores, th_steps, return_thresold=False):
-    padding_list = [0]*(len(true_scores) - len(scores))
+    padding_list = [0]*(len(true_scores) - len(scores)) # has a length of 0
     # print(padding_list)
 
     if len(padding_list) > 0:
         scores = padding_list + scores
 
-    scores_sorted = rankdata(scores, method='ordinal')
+    scores_sorted = rankdata(scores, method='ordinal') # ranks data by giving each point a distinct score based on the value and the order. Values in this case range from 1 to 12656
     th_steps = th_steps
     # th_steps = 500
     th_vals = np.array(range(th_steps)) * 1.0 / th_steps
     fmeas = [None] * th_steps
     thresholds = [None] * th_steps
     for i in range(th_steps):
-        cur_pred = scores_sorted > th_vals[i] * len(scores)
+        cur_pred = scores_sorted > th_vals[i] * len(scores) # returns a one dimensional array of length 12656 of boolean values
 
         fmeas[i] = f1_score(true_scores, cur_pred)
 

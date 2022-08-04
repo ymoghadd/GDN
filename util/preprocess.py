@@ -83,6 +83,8 @@ def construct_data(data, feature_map, labels=0):
     return res
 
 def build_loc_net(struc, all_features, feature_map=[]):
+    print('all_features: ', all_features, '\n')
+    print('feature_map: ', feature_map, '\n')
 
     index_feature_map = feature_map
     edge_indexes = [
@@ -114,3 +116,23 @@ def build_loc_net(struc, all_features, feature_map=[]):
 
     
     return edge_indexes
+
+    '''
+    for node in nodes:
+        graph.add_node(node)
+
+    for child_index, parent_index in zip(edge_indexes[0], edge_indexes[1]):
+        edge = (nodes[parent_index], nodes[child_index])
+        edges.append(edge)    
+        graph.add_edge(edge[0], edge[1])
+
+    nx.draw(graph)
+    plt.savefig('All_110_graph.png')
+
+    with open('All_110_edges_and_num_nodes.csv', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Parent node', 'Child node'])
+        for edge in edges:
+            writer.writerow([edge[0], edge[1]])
+        writer.writerow(['Total number of nodes:', len(nodes)])  
+    '''

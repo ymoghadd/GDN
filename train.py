@@ -13,18 +13,33 @@ from evaluate import get_best_performance_data, get_val_performance_data, get_fu
 from sklearn.metrics import precision_score, recall_score, roc_auc_score, f1_score
 from torch.utils.data import DataLoader, random_split, Subset
 from scipy.stats import iqr
+import tqdm
+import time
+import csv
 
-
-
+loss_list = []
+ACU_loss_list = []
 
 def loss_func(y_pred, y_true):
+    #print('y_pred shape: ', y_pred.shape)
+    #print('y_true shape: ', y_true.shape)
     loss = F.mse_loss(y_pred, y_true, reduction='mean')
 
     return loss
 
 
+def recompute_labels(labels, slide_win, slide_stride):
+    original_lables = labels
+    new_labels = []
+
+    #for i in range(0, len(labels)-slide_stride):
+    #    for i in range(i+)
+
+
 
 def train(model = None, save_path = '', config={},  train_dataloader=None, val_dataloader=None, feature_map={}, test_dataloader=None, test_dataset=None, dataset_name='swat', train_dataset=None):
+
+    time_each_epoch_takes = list()
 
     seed = config['seed']
 
@@ -45,7 +60,9 @@ def train(model = None, save_path = '', config={},  train_dataloader=None, val_d
     best_prec = 0
 
     i = 0
+    print('in train.py')
     epoch = config['epoch']
+    print(epoch)
     early_stop_win = 15
 
     model.train()
@@ -55,19 +72,23 @@ def train(model = None, save_path = '', config={},  train_dataloader=None, val_d
 
     dataloader = train_dataloader
 
+    epoch_progress = tqdm.tqdm(total=epoch, desc='Epoch')
     for i_epoch in range(epoch):
+        start = time.time()
 
-        acu_loss = 0
-        model.train()
+        acu_loss = 0 
+        model.train() # simply puts the model in training mode
 
-        for x, labels, attack_labels, edge_index in dataloader:
+        for x, labels, attack_labels, edge_index in dataloader: # size of x: [32, 17, 5]; size of labels: [32, 17]; attack_labels: [32]
+            # length of x (and labels and attack_labels since they are all the same length) is reduced since some of the training dataset was split to become the validation and because data is loaded in batches
             _start = time.time()
 
             x, labels, edge_index = [item.float().to(device) for item in [x, labels, edge_index]]
 
             optimizer.zero_grad()
-            out = model(x, edge_index).float().to(device)
-            loss = loss_func(out, labels)
+            out = model(x, edge_index).float().to(device) # does forward propagation
+
+            loss = loss_func(out, labels) # measures how well model predicted the sensor data (labels) at the current timestamp
             
             loss.backward()
             optimizer.step()
@@ -78,12 +99,15 @@ def train(model = None, save_path = '', config={},  train_dataloader=None, val_d
                 
             i += 1
 
+        loss_list.append(acu_loss/len(dataloader))
+        ACU_loss_list.append(acu_loss)
 
         # each epoch
         print('epoch ({} / {}) (Loss:{:.8f}, ACU_loss:{:.8f})'.format(
                         i_epoch, epoch, 
                         acu_loss/len(dataloader), acu_loss), flush=True
             )
+
 
         # use val dataset to judge
         if val_dataloader is not None:
@@ -98,6 +122,7 @@ def train(model = None, save_path = '', config={},  train_dataloader=None, val_d
             else:
                 stop_improve_count += 1
 
+            epoch_progress.update(1)
 
             if stop_improve_count >= early_stop_win:
                 break
@@ -107,6 +132,22 @@ def train(model = None, save_path = '', config={},  train_dataloader=None, val_d
                 torch.save(model.state_dict(), save_path)
                 min_loss = acu_loss
 
+        time_each_epoch_takes.append(time.time()-start)
+
+    with open(f'C:\\Users\\yasi4\\OneDrive\\Documents\\GitHub\\GDN\\TimeDifference_epoch_train_losses.csv', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'Loss', 'ACU_loss'])
+        for i in range(0, len(loss_list)):
+            writer.writerow([i, loss_list[i], ACU_loss_list[i]])
+    
+    with open(f'C:\\Users\\yasi4\\OneDrive\\Documents\\GitHub\\GDN\\TimeDifference_training_duration.csv', 'w') as f:
+        writer = csv.writer(f)
+        writer.writerow(['Epoch', 'Duration in seconds, Total Time in minutes'])
+
+        total_time = 0
+        for i in range(0, len(time_each_epoch_takes)):
+            total_time += time_each_epoch_takes[i]
+            writer.writerow([i+1, time_each_epoch_takes[i], total_time/60])
 
 
     return train_loss_list
